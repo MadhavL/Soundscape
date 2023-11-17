@@ -1,0 +1,449 @@
+//Madhav Lavakare - CPSC 035 Final Project - SuperCollider code
+//Note*: All citations are recorded as comments inline.
+//Since this project is a physical computing project, emphasis has been placed on the control sequences rather than original sound design
+
+//SynthDefs for sounds
+(
+//LEAD SOUND - original lead sound
+SynthDef(\lead, {|freq = 160, amps = 0.8, cut = 150, gate = 1, out = 0, pan = 0, detune = 0.01|
+	//envelope
+	var env = Env.adsr(0.05, 0.3, 0.7, 0.25, 0.8).kr(2, gate);
+	//sound generators
+	var snd = (Saw.ar(freq, env) + Saw.ar(freq * (2.0 + (detune +0.01)), env) + Saw.ar(freq / (2 - detune), env) + Saw.ar(freq *(4 + detune), env) + Saw.ar(freq /(4 + (detune + 0.02)), env)) * 0.2;
+	//filters
+	var hp = HPF.ar(snd, cut);
+	//Output
+	Out.ar(out, Pan2.ar(hp,pan));
+}).add;
+
+
+//AMBIENT PAD SOUND - citation: https://sccode.org/1-4QL
+SynthDef(\ChicagoPad2, { |out = 0, freq = 440, /*freq2=660, freq3=528,*/ cutoffControl, amp = 0.2, gate=1|
+    var snd;
+    var delay = 0.045+0.05;
+	var freq2 = freq/2;
+	var freq3 = freq*2;
+	var cutoff = In.kr(cutoffControl, 1).linexp(5000, 60000, 300, 5000);
+    freq = freq + SinOsc.kr(freq*1/2, 0, freq/2, 0);
+    snd = Saw.ar([freq, freq+1, freq-1, freq2, freq3] * [0.99,1])*0.1;
+    snd = snd + VarSaw.ar(0.99*[freq, freq+1, freq-1, freq2, freq3, freq2+1, freq3+1],0, LFTri.kr(7.13).range(0.00,0.1))*0.1;
+    snd = Mix(snd);
+    snd = FreeVerb.ar(snd, 0.51,10,0.1)*2;
+    snd = snd *8;
+    snd = RLPF.ar(snd, SinOsc.kr([0.1,4.2], 0, [1700,480], [4000,700,5000])/[20.51,20], SinOsc.ar(0.1,1.5*pi)+1.05)/3;
+    snd = Mix(snd);
+	snd = MoogFF.ar(snd, SinOsc.kr(0.08, 0.5, (cutoff/10).lag(0.1), cutoff.lag(0.1)), 3, 0);
+    snd = snd * EnvGen.ar(Env.dadsr(delay,0.4, 0.01,0.8,0.4), gate, doneAction:2);
+    //snd = snd * EnvGen.ar(Env.adsr(0.4, 0.01,0.8,0.4), gate, doneAction:2);
+    snd = [snd , AllpassC.ar(snd, delay, 0.05+SinOsc.ar(0.11).range(0,0.045), 0.3)];
+    snd = snd * amp;
+    Out.ar(out, snd);
+}).add;
+
+
+//WOODY INSTRUMENT - citation: stealthissoundedited-v3.scd (file hosted on Scott's notion page)
+SynthDef(\winwoodlead,{arg out= 0, freqControl = ~noteControl, /*amp = 0.1*/ gate=1, cutoffControl, rq=0.8, lfowidthControl, lforate= 8, lagamount=0.01, pan=0.0;
+	var pulse, filter, env, lfo;
+	var freq = In.kr(freqControl, 1);
+	var lfowidth = In.kr(lfowidthControl, 1).linlin(90, 500,0, 0.2);
+	var cutoff = In.kr(cutoffControl,1).linlin(0,2000, 5000, 500);
+	var amp = In.kr(cutoffControl,1).linexp(0,2000,0.05,0.25);
+	lfo = LFTri.kr(lforate,Rand(0,2.0)!2);
+	pulse = Mix(Pulse.ar((freq.lag(lagamount))*[1,1.001]*(1.0+(lfowidth*lfo)),[0.2,0.19]))*0.5;
+	filter =  RLPF.ar(pulse,cutoff.lag(0.2),rq);
+	//remove low end
+	filter = BLowShelf.ar(filter,351,1.0,-9);
+	env = EnvGen.ar(Env.adsr(0.01,0.0,0.9,0.05),gate,doneAction:2);
+	Out.ar(out,Pan2.ar(filter*env*amp,pan));
+}).add;
+
+//WHITE NOISE Bandpassed - created my own white noise synthdef with controls for amp, cutoff and rq reading from sensor control buses
+SynthDef(\noise, {|ampControl cutoffControl rqControl pan = 0|
+	var cutoff = In.kr(cutoffControl,1).linexp(6,1018,100,10000);
+	var amp = In.kr(cutoffControl,1).linexp(6,1018,1,0.2);
+	var rq = In.kr(rqControl,1).linlin(90, 1000, 0.1, 0.5);
+	Out.ar(0, Pan2.ar(BPF.ar(WhiteNoise.ar(amp), cutoff.lag(0.1), rq), pan, amp));
+}).add;
+
+//PLUCK instrument - citation: "plucking," from https://sccode.org/1-550/fork
+SynthDef(\pluck, {arg ampControl, freq = 440, decay = 5, panControl, coef = 0.1;
+	var env, snd;
+	var amp = In.kr(ampControl, 1).linlin(5000,60000,0.6, 0.05);
+	var pan = In.kr(panControl, 1).linlin(6,1018,-1,1);
+	env = EnvGen.kr(Env.linen(0, decay, 0), doneAction: 2);
+	snd = Pluck.ar(
+		in: WhiteNoise.ar(amp),
+		trig: Impulse.kr(0),
+		maxdelaytime: 0.1,
+		delaytime: freq.reciprocal,
+		decaytime: decay,
+		coef: coef);
+	Out.ar(0, Pan2.ar(snd, pan));
+}).add;
+
+//PLUCK instrument 2 - Original pluck instrument with reverb: Madhav
+SynthDef(\pluck2, {|freq = 400, amps = 0.8, cut = 3600 |
+	//envelopes
+	var env = Env.perc(0.1, 0.1, amps).kr();
+
+	//Saw.ar(freq) * env; //scaling the amplitude of the Saw by the loudness envelope
+	//var snd1 = Saw.ar(freq, Env.perc(0.1, 0.1, amps).kr(2)); //same as above because mul is the multiplier for amplitude
+	var snd2 = Saw.ar(freq, Env.perc(0.1, 0.1, amps).kr());
+	//filters
+	var lp = LPF.ar(snd2, 3000);
+	//FX
+	var verb = FreeVerb.ar(lp, 0.9, 0.9, 0, Env.linen(0.1, 0.1, amps).kr(2));
+	//Output
+	Out.ar(0, verb);
+}).add;
+
+//Click sound sample
+b = Buffer.read(s, Platform.resourceDir +/+ "sounds/click.wav");
+SynthDef(\click, {| out = 0, bufnum = 0, panControl |
+	var pan = In.kr(panControl, 1).linlin(90,500,-1,1);
+    Out.ar(out,
+		Pan2.ar(Mix(PlayBuf.ar(2, bufnum, BufRateScale.kr(bufnum), doneAction: Done.freeSelf)),pan)
+    )
+}).add;
+)
+
+//----------------END OF SYNTHDEFS------------------------//
+
+SerialPort.devices;
+~port = SerialPort.new("/dev/cu.usbserial-1120", 9600);
+~port.close;
+
+//LOOP TO START POLLING ARDUINO VALUES
+(
+~charArray = [ ];
+~joystickYVal = Bus.control(s, 1);
+~joystickXVal = Bus.control(s,1);
+~touchVal = Bus.control(s,1);
+~sliderVal = Bus.control(s,1);
+~distanceVal = Bus.control(s,1);
+~noteControl = Bus.control(s,1);
+~imuXVal = Bus.control(s, 1);
+~imuYVal = Bus.control(s,1);
+~getValues = Routine.new({
+	var ascii;
+	{
+		ascii = ~port.read.asAscii;
+		if(ascii.isDecDigit, {~charArray = ~charArray.add(ascii.digit)});
+		if(ascii == $a, {
+			~joystickYVal.set([~charArray.convertDigits]);
+			~charArray = [ ];
+		});
+		if(ascii == $b, {
+			~joystickXVal.set([~charArray.convertDigits]);
+			~charArray = [ ];
+		});
+		if(ascii == $c, {
+			~touchVal.set([~charArray.convertDigits]);
+			~charArray = [ ];
+		});
+		if(ascii == $d, {
+			~sliderVal.set([~charArray.convertDigits]);
+			~charArray = [ ];
+		});
+		if(ascii == $e, {
+			~distanceVal.set([~charArray.convertDigits]);
+			~noteControl.set((Scale.minorPentatonic.degrees+50).at(s.getControlBusValue(~distanceVal.index).linlin(5000,60000,0,4.99).trunc).midicps);
+			~charArray = [ ];
+		});
+		if(ascii == $f, {
+			~imuXVal.set([~charArray.convertDigits]);
+			~charArray = [ ];
+		});
+		if(ascii == $g, {
+			~imuYVal.set([~charArray.convertDigits]);
+			~charArray = [ ];
+		});
+	}.loop;
+}).play;
+)
+
+//Stop polling values and free the control buses
+(
+~getValues.stop;
+~joystickYVal.free;
+~distanceVal.free;
+~sliderVal.free;
+~joystickXVal.free;
+~touchVal.free;
+~imuXVal.free;
+~imuYVal.free;
+)
+
+//Get the value of each control bus
+~joystickYVal.get; //6 to 1018
+~joystickXVal.get; //6 to 1018
+~touchVal.get; //0 or 856 (map 0,700 to 0,1 round) **CHANGE - ADD
+~sliderVal.get; // 90 to 1000
+~distanceVal.get; //5000 to 60000
+~noteControl.get;
+~imuXVal.get; //0 to 2000, 1000 is center
+~imuYVal.get; //0 to 2000
+
+//Synths with sensors controlling values:
+Synth(\winwoodlead, [\lfowidthControl, ~sliderVal, \cutoffControl, ~imuXVal, \freqControl, ~noteControl]);
+Synth(\ChicagoPad2, [\amp, 0.2, \cutoffControl, ~distanceVal]);
+Synth(\noise, [\cutoffControl, ~joystickYVal, \rqControl, ~sliderVal]);
+Synth(\pluck, [\panControl, ~joystickXVal, \ampControl, ~distanceVal]);
+
+//Chord/note definitions
+(
+~root = 60; //C
+~chords = [[0, 3, 7, 12], [0, 5, 8, 12], [-2, 2, 5, 10], [2, 7, 9, 14]]+~root;
+~minor_notes = [0, 2, 3, 5, 7, 8, 11, 12]+~root;
+~durs = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75, 3, 3.25, 3.5, 3.75, 4];
+)
+
+//Individual patterns for each synth modulated by sensor values
+~chord_prog = Pbind(\instrument, \ChicagoPad2, \legato, 1, \amp, 0.2, \cutoffControl, ~distanceVal, \midinote, Prand(~chords, inf), \dur, 4);
+~pluck = Pbind(\instrument, \pluck, \midinote, Prand(~minor_notes, inf), \dur, Prand(~durs, inf), \panControl, ~joystickXVal, \ampControl, ~distanceVal);
+~noise = Pmono(\noise, \cutoffControl, ~joystickXVal, \rqControl, ~sliderVal);
+~lead = Pmono(\winwoodlead, \lfowidthControl, ~sliderVal, \cutoffControl, ~imuXVal, \freqControl, ~noteControl);
+
+~chord_prog.play;
+~pluck.play;
+~noise.play;
+~lead.play;
+
+//All combined - soundscape
+Ppar([~chord_prog, ~pluck, ~noise, ~lead]).play;
+
+//Click sound with delay time controlled by sensor:
+(
+~clicks = Routine.new({
+	{
+		Synth(\click, [\panControl, ~sliderVal]);
+		s.getControlBusValue(~imuYVal.index).linlin(0,2000,4, 0.125).trunc(0.125).wait;
+	}.loop;
+}).play;
+)
+
+//----------------------------END OF SOUNDSCAPE--------------------------------//
+
+//Demonstrating the power of this system, Part 1.
+//Taking an already existing SuperCollider song and MODIFYING IT to provide user input to the song!
+
+//Citation:
+/*********************************************************
+* The legendary Super Mario Theme for SuperCollider      *
+* created by David Hofmann, HfM Karlsruhe, February 2011 *
+*                                                        *
+* Contains all three voices and percussion sounds        *
+**********************************************************/
+//Link: https://sccode.org/1-11N
+
+(
+// global pitch Offset, can be used to transpose the whole song
+~pitchOffset = 60;
+
+// global duration divisor, can be used to make the song faster or slower
+~durParam = 6.5;
+
+// *************************** SynthDefs ***************************
+
+// SynthDef for the first and second voice - MADHAV modified to add Panning and reverb controlled by sensors
+SynthDef(\mario, { |out, amp=0.3, freq=440, panControl, reverbControl|
+	var snd;
+	var pan = In.kr(panControl, 1).linlin(0,2000,-1,1);
+	var mix = In.kr(reverbControl, 1).linlin(512, 1018, 0, 1);
+	snd = LFPulse.ar(freq)!2;
+	snd = snd * EnvGen.ar(Env.linen(0.001, 0.1, 0.03), doneAction:2);
+	snd = FreeVerb.ar(snd, mix);
+	OffsetOut.ar(out, Mix(Pan2.ar(snd, pan, amp)));
+}).add;
+
+//MADHAV created a duplicate and panned it opposite of the first one - thus the pan Control also controls stereo separation
+SynthDef(\mario2, { |out, amp=0.3, freq=440, panControl, reverbControl|
+	var snd;
+	var pan = In.kr(panControl, 1).linlin(0,2000,1,-1);
+	var mix = In.kr(reverbControl, 1).linlin(512, 1018, 0, 1);
+	snd = LFPulse.ar(freq)!2;
+	snd = snd * EnvGen.ar(Env.linen(0.001, 0.1, 0.03), doneAction:2);
+	snd = FreeVerb.ar(snd, mix);
+	OffsetOut.ar(out, Mix(Pan2.ar(snd, pan, amp)));
+}).add;
+
+// SynthDef for the bass
+SynthDef(\bass, { |out, amp=0.5, freq=440, pan = 0, distortControl|
+	var snd;
+	var distort = In.kr(distortControl, 1).linexp(5000,60000,0.5,0.00001);
+	snd = LFTri.ar(freq).round(distort);
+	snd = snd * EnvGen.ar(Env.linen(0.001, 0.1, 0.03), doneAction:2);
+	OffsetOut.ar(out, Pan2.ar(snd, pan, amp));
+}).add;
+
+// SynthDef for percussion sounds - MADHAV modified this to add panControl, and Mix the 2 channels down to one and place it in a call to pan.
+SynthDef(\beat, { |out, amp=0.3, sustain=0.01, panControl|
+	var snd;
+	var pan = In.kr(panControl, 1).linlin(0,2000,-1,1);
+	snd = WhiteNoise.ar()!2;
+	snd = HPF.ar(snd, 2000);
+	snd = snd * EnvGen.ar(Env.linen(0.005, sustain, 0.01), doneAction:2);
+	OffsetOut.ar(out, Mix(Pan2.ar(snd, pan, amp)));
+}).add;
+
+//Synth(\mario);
+//Synth(\bass);
+//Synth(\beat, [\sustain, 0.05]);
+
+(
+{
+	/* Here comes the note and rhythm data.
+	 * The overall sequence of the song is:
+	 * Intro
+	 * Part 1 (2x)
+	 * Part 2 (2x)
+	 * Part 3
+	 * Intro
+	 * Part 1 (2x)
+	 * Part 4 (2x)
+	 * Part 3
+	 * Intro */
+
+	// Pseqs of note lengths. These rhythms are used by voice 1 and 2 commonly, they are always parallel
+	// Intro
+	var times_intro =  Pseq([1, 2, 2, 1, 2, 4, 4]);
+	// Part 1
+	var triplet = Pn(4/3, 3);
+	var times_part1 = Pseq([ Pn(3,3), 2,  2, 1, 2, triplet,  2,  1,  2,  2,  1,  1,  3]);
+	// Part 2
+	var seq1 = Pseq([Pn(1,3), 2, 2]);
+	var seq2 = Pseq([1, 1, 2, 1, 1, 3]);
+	var times_part2  =  Pseq([2, seq1, seq2, seq1, 2, 1, 6, seq1, seq2,  3, 3, 8]);
+	// Part 3
+	var seq3 = Pseq([1, 2, 2, 1, 2, 1, 2, 1, 4]);
+	var times_part3  = Pseq([ seq3, 1, 2, 2, 1, 1, 9, seq3]);
+	// Part 4
+	var seq4 = Pseq([1, 2, 3, 2, 1, 2, 1, 4]);
+	var times_part4  = Pseq([seq4, Pn(triplet, 2),  1, 2, 1, 4, seq4, Pn(triplet, 2), 8]);
+
+	// *************************** Notes for Voice 1 ***************************
+	// Intro
+	var notes_intro_1 = Pseq([Pn(16,3), 12, 16, 19, 7]);
+	// Part 1
+	var notes_part1_1 = Pseq([12, 7, 4, 9, 11, 10, 9, 7, 16, 19, 21, 17, 19, 16, 12, 14, 11 ]);
+	// Part 2
+	var nseq1 = Pseq([19, 18, 17, 15, 16]);
+	var nseq2 = Pseq([7, 9, 12, 9, 12, 14]);
+	var notes_part2_1 = Pseq([\rest, nseq1, nseq2, nseq1, Pn(24,3), nseq1, nseq2, 15, 14, 12]);
+	// Part 3
+	var nseq3 = Pseq([Pn(12,4), 14, 16]);
+	var notes_part3_1 = Pseq([nseq3, 12, 9, 7, Pn(nseq3, 2), 12, 9, 7]);
+	// Part 4
+	var nseq4 = Pseq([16, 12, 7, 8, 9, 17, 17, 9, 11]);
+	var notes_part4_1 = Pseq([nseq4, Pn(21,3), 19, 17, 16, 12, 9, 7, nseq4, Pn(17,3), 16, 14, 12]);
+
+	// *************************** Notes for Voice 2 ***************************
+	// Intro
+	var notes_intro_2 = Pseq([Pn(6,5), 7, 7]);
+	// Part 1
+	var notes_part1_2 = Pseq([4, 0, -5, 0, 2, 1, 0, 0, 7, 11, 12, 9, 11, 9, 2, 5, 2 ]);
+	// Part 2
+	var nseq5 = Pseq([16, 15, 14, 11, 12]);
+	var nseq6 = Pseq([4, 5, 7, 0, 4, 5]);
+	var notes_part2_2 = Pseq([\rest, nseq5, nseq6, nseq5, Pn(19,3), nseq5, nseq6, 8, 5, 4]);
+	// Part 3
+	var nseq7 = Pseq([Pn(8,4), 10, 7]);
+	var notes_part3_2 = Pseq([nseq7, 4, 4, 0, Pn(nseq7, 2), 4, 4, 0]);
+	// Part 4
+	var nseq8 = Pseq([12, 9, 4, 4, 5, 12, 12, 5, 7]);
+	var notes_part4_2 = Pseq([nseq8, Pn(17,3), 16, 14, 12, 9, 5, 4, nseq8, Pn(14,3), 12, 11, 7]);
+
+	// *************************** Rhythm and notes for the bass ***************************
+	// Intro
+	var notes_intro_bass = Pseq([2, 2, 2, 2, 2, 11, 7-12]);
+	// Part 1
+	var notes_part1_bass = Pseq([7, 4, 0, 5, 7, 6, 5, 4, 12, 16, 17, 14, 16, 12, 9, 11, 7]-12);
+	// Part 2
+	var nseq9 = Pseq([0, 7, 12, 5, Pn(12,3), 5, 0]);
+	var notes_part2_bass = Pseq([nseq9, 4, 7, 12, Pn(29,3), 7, nseq9, 8, 10, 12, 7, 7, 0]-12);
+	var seq5 = Pseq([3, 3, 2, 3, Pn(1,3), 2]);
+	var seq6 = Pseq([3, 3, 1, 2, 2]);
+	var times_part2_bass  = Pseq([seq5, seq6, 1, 2, 2, seq5, 2, 3, seq6]);
+	// Part 3
+	var nseq10 = Pseq([8, 15, 20, 19, 12]);
+	var notes_part3_bass = Pseq([nseq10, 7, nseq10, 12, 7, nseq10, 7]-24);
+	var seq7 = Pseq([3, 3, 2]);
+	var times_part3_bass  = Pseq([Pn(seq7, 3), 3, 1, 2, 2, Pn(seq7, 2)]);
+	// Part 4
+	var nseq11 = Pseq([0, 3, 4, 12, 5, 5, 12, 12, 5]);
+	var notes_part4_bass = Pseq([nseq11, 2, 5, 7, 11, 7, 7, 12, 12, 7, nseq11, Pn(7,3), 9, 11, 12, 7, 7, 0]-12);
+	var seq8 = Pseq([3, 1, Pn(2,4), 1, 1, 2]);
+	var times_part4_bass  = Pseq([Pn(seq8,3), 3, 1, triplet, 1, 2, 1, 4]);
+
+	// *************************** Rhythm (times) and sustain lengths (notes) of the percussion track ***************************
+	// Intro
+	var notes_intro_drums = Pseq([5, 1, 5, 1, 5, 5, 5, 1, 1, 1]);
+	var times_intro_drums = Pseq([2, 1, 2, 1, 2, 3, 2, 1, 1, 1]);
+
+	// Part 1
+	var notes_part1_drums = Pseq([\rest, 1, 1, 5, 1, 1]);
+	var times_part1_drums = Pseq([2,8/6,4/6,2,8/6,4/6]);
+
+	// Part 2 has the same drums as part 1
+	// Part 3 notes are the same as the intro notes
+	var times_part3_drums = Pseq([2, 1, 2, 1, 2, 3, 2, 1, 1, 1]);
+
+	// Part 4
+	var notes_part4_drums = Pseq([1, 1, 5, 1]);
+	var times_part4_drums = Pseq([3, 1, 2, 2]);
+
+	// whole percussion track
+	var drums_notes = Pseq([notes_intro_drums, Pn(notes_part1_drums, 8), Pn(notes_part1_drums, 16), Pn(notes_intro_drums, 4), Pn(notes_part1_drums, 8), Pn(notes_part4_drums, 16), Pn(notes_intro_drums, 4)]/100);
+
+	// *************************** Pdefs ***************************
+	// Pdef for Voice 1
+	Pdef(\voice1, Pbind(
+		\instrument, \mario,
+		\panControl, ~imuXVal,
+		\reverbControl, ~joystickYVal,
+		\dur, Pseq([times_intro, Pn(times_part1, 2), Pn(times_part2, 2), times_part3, times_intro, Pn(times_part1, 2), Pn(times_part4, 2), times_part3, times_intro]/~durParam),
+		\midinote, Pseq([notes_intro_1, Pn(notes_part1_1, 2), Pn(notes_part2_1, 2), notes_part3_1, notes_intro_1, Pn(notes_part1_1, 2), Pn(notes_part4_1, 2), notes_part3_1, notes_intro_1]+~pitchOffset)
+	)).play;
+
+	// Pdef for Voice 2
+	Pdef(\voice2, Pbind(
+		\instrument, \mario2,
+		\panControl, ~imuXVal,
+		\reverbControl, ~joystickYVal,
+		\dur, Pseq([times_intro, Pn(times_part1, 2), Pn(times_part2, 2), times_part3, times_intro, Pn(times_part1, 2), Pn(times_part4, 2), times_part3, times_intro]/~durParam),
+		\midinote, Pseq([notes_intro_2, Pn(notes_part1_2, 2), Pn(notes_part2_2, 2), notes_part3_2, notes_intro_2, Pn(notes_part1_2, 2),Pn(notes_part4_2, 2), notes_part3_2, notes_intro_2]+~pitchOffset)
+	)).play;
+
+	// Pdef for the Bass
+	Pdef(\voice3, Pbind(
+		\instrument, \bass,
+		\distortControl, ~distanceVal,
+		\dur, Pseq([times_intro, Pn(times_part1, 2), Pn(times_part2_bass, 2), times_part3_bass, times_intro, Pn(times_part1, 2), Pn(times_part4_bass, 2), times_part3_bass, times_intro]/~durParam),
+		\midinote, Pseq([notes_intro_bass, Pn(notes_part1_bass, 2), Pn(notes_part2_bass, 2), notes_part3_bass, notes_intro_bass, Pn(notes_part1_bass, 2),Pn(notes_part4_bass, 2), notes_part3_bass, notes_intro_bass]+~pitchOffset)
+	)).play;
+
+	// Pdef for the percussion track
+	// it uses the notes both for \degree and \sustain. The \degree mapping is only needed for rests
+	Pdef(\percussion, Pbind(
+		\instrument, \beat,
+		\panControl, ~imuYVal,
+		\dur, Pseq([times_intro_drums, Pn(times_part1_drums, 8), Pn(times_part1_drums, 16), Pn(times_part3_drums, 3), times_intro_drums, Pn(times_part1_drums, 8), Pn(times_part4_drums, 16), Pn(times_part3_drums, 3), times_intro_drums]/~durParam),
+		\degree, drums_notes,
+		\sustain, drums_notes
+	)).play;
+
+}.value
+)
+)
+
+//MODIFY THE TEMPO OF THE PIECE WITH THE SLIDER!
+(
+~tempoMod = Routine.new({
+	{
+		TempoClock.default.tempo = s.getControlBusValue(~sliderVal.index).linlin(90,500,0.5, 1.5);
+		0.1.wait;
+	}.loop;
+}).play;
+)
+~tempoMod.stop;
+TempoClock.default.tempo = 1;

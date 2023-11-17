@@ -1,0 +1,15 @@
+Resources needed for project:
+
+1. Arduino libraries:
+- Arduino.h
+- Wire.h
+- DFRobot VL53L0X & associated (available through built-in installer)
+- Adafruit MPU6050 & associated (available through built-in installer)
+- Adafruit Sensor (available through built-in installer)
+
+2. Sound files:
+- click.wav (provided in zipped file) should be in default resources directory: Platform.resourceDir +/+ "sounds/"
+For my system it was at: Applications/SuperCollider.app/Contents/Resources/sounds/
+
+3. Circuit diagram:
+Provided in blog post and in zipped file
